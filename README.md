@@ -54,18 +54,18 @@ flowchart TB
     USER["Browser Pengguna\n(http://localhost:4200)"]
 
     subgraph DOCKER["Docker Compose Network"]
-        FE["Container: frontend\nAngular Web UI + Nginx\nPort 4200 -> 80"]
+        FE["Container: frontend\nAngular 18 Web UI + Nginx\nHost Port 4200 -> 80"]
 
-        subgraph BE["Container: backend (Spring Boot Modular Monolith — Port 8080)"]
+        subgraph BE["Container: backend (Spring Boot 3.3 Modular Monolith — Host Port 8085 -> 8080)"]
             CTL["controller\n(REST API /api/v1)"]
-            SVC["service\n(Payroll Orchestrator, Snapshot,\nMaster Read, Simulator, Journal)"]
+            SVC["service\n(PayrollEngineService, StartupSeeder)"]
             CALC["service/calculator\n(Prorata, Overtime, BPJS,\nPPh 21 TER/P17/Gross-Up)"]
             REPO["repository & entity\n(Spring Data JPA / Hibernate)"]
             FLY["Flyway Migration\n(V1 DDL + V2 Seed Data)"]
         end
 
-        DB[("Container: postgres\nPostgreSQL 16 ACID\nPort 5432")]
-        RD[("Container: redis\nRedis 7 Cache, Job Status\n& Idempotency Lock\nPort 6379")]
+        DB[("Container: postgres\nPostgreSQL 16 ACID\nHost Port 5439 -> 5432")]
+        RD[("Container: redis\nRedis 7 Cache, Job Status\n& Idempotency Lock\nHost Port 6381 -> 6379")]
     end
 
     USER -->|"HTTP"| FE
@@ -80,7 +80,7 @@ flowchart TB
 
 ### 2.3 Alur Mesin Perhitungan Gaji 13 Tahap
 
-Pipeline deterministik yang dijalankan oleh `PayrollRunService` dan paket `service/calculator` untuk setiap karyawan pada sebuah `PayrollRun`:
+Pipeline deterministik yang dijalankan oleh `PayrollEngineService` dan paket `service/calculator` untuk setiap karyawan pada sebuah `PayrollRun`:
 
 ```mermaid
 flowchart TD
@@ -123,43 +123,47 @@ Menggunakan konvensi **Standard Layered Architecture** yang umum dipakai oleh de
 ```text
 Payroll/
 ├── README.md                                  # Dokumentasi utama proyek ini
-├── docker-compose.yml                         # (Tahap setup) Orkestrasi 4 container (postgres, redis, backend, frontend)
-├── backend/                                   # Aplikasi Backend Spring Boot (Java 21)
-│   ├── Dockerfile                             # (Tahap setup) Multi-stage build Maven -> JRE
-│   ├── pom.xml                                # (Tahap setup) Dependensi Spring Web, JPA, PostgreSQL, Redis, Flyway
+├── docker-compose.yml                         # Orkestrasi 4 container (postgres, redis, backend, frontend)
+├── docs/                                      # Dokumentasi BA, SA, ERD, API & Roadmap SDLC
+├── backend/                                   # Aplikasi Backend Spring Boot 3.3 (Java 21)
+│   ├── Dockerfile                             # Multi-stage build Maven -> JRE 21
+│   ├── pom.xml                                # Dependensi Spring Web, JPA, PostgreSQL, Redis, Flyway
 │   └── src/
 │       ├── main/
 │       │   ├── java/com/payroll/
-│       │   │   ├── config/                    # Konfigurasi Spring, Redis, CORS, Async Worker, BigDecimal
-│       │   │   ├── controller/                # REST API Endpoints (@RestController)
-│       │   │   ├── dto/                       # Request & Response DTO (JSON API + Trace DTO)
+│       │   │   ├── PayrollApplication.java    # Entrypoint Spring Boot
+│       │   │   ├── config/                    # Konfigurasi CORS & Spring
+│       │   │   ├── controller/                # PayrollController (/api/v1)
+│       │   │   ├── dto/                       # Request & Response DTO (Java 21 Records)
 │       │   │   ├── entity/                    # Mapping Tabel PostgreSQL (@Entity JPA)
-│       │   │   ├── exception/                 # Global Exception Handler & Error Code Domain (ERR_PAY_*)
+│       │   │   ├── exception/                 # DomainException & GlobalExceptionHandler
 │       │   │   ├── repository/                # Spring Data JPA Repository
-│       │   │   └── service/                   # Logika orkestrasi bisnis (PayrollRunService, JournalService, dll.)
-│       │   │       └── calculator/            # Mesin hitung murni (Prorata, Overtime, BPJS, PPh 21 TER/P17/Gross-Up)
+│       │   │   └── service/                   # PayrollEngineService & StartupSeederRunner
+│       │   │       └── calculator/            # ProrataCalculator, OvertimeCalculator, BpjsCalculator, Pph21Calculator
 │       │   └── resources/
+│       │       ├── application.yml            # Konfigurasi datasource, Redis & Flyway
 │       │       └── db/migration/              # Skrip SQL Flyway (V1__init_schema.sql & V2__seed_master_data.sql)
 │       └── test/
 │           └── java/com/payroll/
-│               └── service/calculator/        # Unit test vektor perhitungan gaji deterministik
-└── frontend/                                  # Aplikasi Web Portal Angular
-    ├── Dockerfile                             # (Tahap setup) Build Angular -> Nginx static server
-    ├── package.json                           # (Tahap setup) Dependensi Angular CLI & RxJS
+│               └── service/calculator/        # PayrollCalculatorTest (unit test vektor kalkulasi)
+└── frontend/                                  # Aplikasi Web Portal Angular 18
+    ├── Dockerfile                             # Build Angular -> Nginx static server + API reverse proxy
+    ├── nginx.conf                             # Proxy /api/ -> http://backend:8080/api/
+    ├── package.json                           # Dependensi Angular 18 & RxJS
     └── src/
         ├── app/
+        │   ├── app.component.ts               # Layout & navigasi utama
+        │   ├── app.routes.ts                  # Routing halaman Angular
         │   ├── core/
-        │   │   ├── models/                    # Interface TypeScript untuk DTO Payroll, Trace, Karyawan, Jurnal
-        │   │   └── services/                  # Service HTTP Client pemanggil /api/v1
+        │   │   ├── models/                    # TypeScript interfaces (payroll.model.ts)
+        │   │   └── services/                  # HTTP Client Service (payroll-api.service.ts)
         │   ├── pages/
-        │   │   ├── master-data/               # Halaman lihat data karyawan, komponen, absensi & aturan hasil inject
-        │   │   ├── payroll-run/               # Halaman eksekusi run, simulator input & tabel Gross-to-Net
-        │   │   └── payslip-trace/             # Halaman Slip Gaji + rincian rumus (Calculation Trace) per karyawan
+        │   │   ├── master-data/               # Halaman Master Data, Skenario & Regulasi (master-data.component.ts)
+        │   │   ├── payroll-run/               # Halaman Payroll Run, Simulator, Register & Jurnal (payroll-run.component.ts)
+        │   │   └── payslip-trace/             # Halaman Slip Gaji & Calculation Trace (payslip-trace.component.ts)
         │   └── shared/
-        │       ├── components/                # Komponen UI pakai ulang (Navigasi, Badge Status/Anomali, Card Ringkasan)
-        │       └── pipes/                     # Pipe format Rupiah (Rp), persentase & masking PII
-        ├── assets/                            # Aset statis frontend
-        └── environments/                      # Konfigurasi URL API per environment
+        │       └── pipes/                     # RupiahPipe (rupiah.pipe.ts)
+        └── environments/                      # environment.ts (apiUrl: '/api/v1')
 ```
 
 > **Catatan Penamaan Package Java:** Folder `backend/src/main/java/com/payroll/` merupakan namespace standar bahasa Java (`package com.payroll.*`) agar class tidak bentrok dengan library eksternal, dan tidak bermasalah meskipun folder root proyek juga bernama `Payroll`.
@@ -177,13 +181,13 @@ Karena modul master di-*inject* langsung lewat skrip SQL (`V2__seed_master_data.
 | **EMP-003** | PKWTT Metode **GROSS-UP**, `K/3` (**TER C**) | Solver iterasi *fixed-point* hingga `Tunjangan Pajak == PPh 21 Terutang` |
 | **EMP-004** | PKWTT Metode **NET** + Tambahan Keluarga BPJS Kes | Pajak ditanggung perusahaan (*Employer Tax Expense*) + potongan +1% anak ke-4 |
 | **EMP-005** | PKWTT Masuk Tengah Bulan (*Joiner*) + *Unpaid Leave* | Prorata hari kerja terjadwal (`hari_dibayar / hari_kerja_periode`) |
-| **EMP-006** | PKWTT Naik Gaji Tengah Periode (efektif tgl 16) | Pemecahan **Multi-Segment Split** 2 periode gaji tanpa menimpa histori |
-| **EMP-007** | PKWT Aktif dengan Lembur Hari Kerja & Libur Resmi | Rumus lembur PP 35/2021 (`1/173`, pengali `1.5x / 2x / 3x / 4x`) |
-| **EMP-008** | PKWTT dengan Cicilan Pinjaman & Uji Batas Potongan 50% | Urutan prioritas potongan, pelacakan saldo pinjaman & deteksi *blocker/warning* |
-| **EMP-009** | PKWTT Resign di Bulan Berjalan / Masa Pajak Desember | Rekonsiliasi **Pasal 17 Masa Pajak Terakhir** & kasus **Lebih Potong (*Tax Refund*)** |
-| **EMP-010** | PKWT Kontrak Berakhir di Periode Berjalan | Perhitungan **Uang Kompensasi PKWT** (`masa_kerja_bulan / 12 × upah_tetap`) + Final Run |
+| **EMP-006** | PKWTT Naik Gaji Tengah Periode (efektif tgl 16) | Pemecahan **Multi-Segment Split** 2 periode gaji (10 hari @ Rp8 jt + 11 hari @ Rp10 jt) |
+| **EMP-007** | PKWT Aktif dengan Lembur Hari Kerja & Libur Resmi | Rumus lembur PP 35/2021 (`1/173`, pengali `1.5x / 2x / 3x / 4x`) + Reimbursement non-upah |
+| **EMP-008** | PKWTT dengan Cicilan Pinjaman & Uji Batas Potongan 50% | Urutan prioritas potongan, `DEDUCTION_OVER_50_PCT`, & status bayar `ON_HOLD` |
+| **EMP-009** | PKWTT Uji Lebih Potong PPh 21 (Desember Refund) | Rekonsiliasi **Pasal 17 Masa Pajak Terakhir** menghasilkan **Lebih Potong (*Tax Refund*)** |
+| **EMP-010** | PKWT Kontrak Berakhir 30 Nov 2026 | Perhitungan **Uang Kompensasi PKWT** (`12/12 × upah_tetap`) + Final Tax Pasal 17 |
 
-> **Catatan Kepatuhan:** Angka parameter awal (tabel TER PP 58/2023 dan batas atas JP BPJS TK) yang dimasukkan oleh skrip *seeder* berfungsi sebagai *baseline* pengembangan/pengujian dan wajib diverifikasi ulang oleh Tax/BPJS Officer terhadap lampiran peraturan resmi sebelum digunakan di produksi.
+> **Catatan Kepatuhan:** Tabel TER PP 58/2023 (125 lapisan: 44 TER A, 40 TER B, 41 TER C) dan parameter awal BPJS (termasuk batas atas JP Rp11.086.300) yang di-*seed* oleh Flyway berfungsi sebagai *baseline* dan tetap wajib diverifikasi terhadap lampiran regulasi resmi sebelum produksi.
 
 ---
 
@@ -197,7 +201,7 @@ Pastikan di mesin Anda sudah terpasang:
 
 ### Menjalankan Seluruh Stack dengan Docker (1 Perintah)
 
-Dari folder root `/home/aliube/Workspace/Project-Personal/Gemini/Payroll` (setelah `docker-compose.yml` dan kode selesai dibuat):
+Dari folder root `/home/aliube/Workspace/Project-Personal/Gemini/Payroll`:
 
 ```bash
 # 1. Build image backend & frontend, lalu nyalakan seluruh layanan di background
@@ -209,12 +213,14 @@ docker compose logs -f backend
 
 ### Akses Layanan Setelah Berjalan
 
-| Layanan | Alamat / Port | Keterangan |
+> **Catatan Port Host:** Port host `5439`, `6381`, dan `8085` digunakan di `docker-compose.yml` agar tidak bentrok dengan layanan lain pada port default (`5432`, `6379`, `8080`). Di dalam jaringan internal Docker, layanan tetap berkomunikasi pada port standar (`postgres:5432`, `redis:6379`, `backend:8080`).
+
+| Layanan | Alamat / Port Host | Keterangan |
 |---|---|---|
-| **Web Frontend (Angular)** | `http://localhost:4200` | Antarmuka utama Payroll Portal |
-| **Backend REST API (Spring Boot)** | `http://localhost:8080/api/v1` | Endpoint kalkulasi, master read, & trace |
-| **PostgreSQL 16** | `localhost:5432` | Database transaksional (skema & seed otomatis via Flyway) |
-| **Redis 7** | `localhost:6379` | Cache, lock idempotensi & status batch job |
+| **Web Frontend (Angular + Nginx)** | `http://localhost:4200` | Antarmuka utama Payroll Portal (otomatis mem-proxy `/api/` ke backend) |
+| **Backend REST API (Spring Boot)** | `http://localhost:8085/api/v1` | Endpoint kalkulasi, master read, simulator, & trace |
+| **PostgreSQL 16** | `localhost:5439` | Database `payroll_db` (user/pass: `payroll` / `payroll123`, skema & seed otomatis via Flyway) |
+| **Redis 7** | `localhost:6381` | Cache status run & lock idempotensi |
 
 ### Menghentikan & Reset Data Awal
 
@@ -232,29 +238,63 @@ docker compose down -v
 
 ### Alur Kerja di Web Portal (`http://localhost:4200`)
 
-1. **Cek Data Master & Skenario (`Master Data`)**
-   * Buka menu **Master Data** untuk melihat seluruh data yang telah ter-*inject* otomatis: profil perusahaan, daftar 10 skenario karyawan uji, komponen gaji, rekap absensi *cutoff*, lembur yang disetujui, serta tabel parameter TER & BPJS aktif.
-2. **Simulasi Perubahan Input (Opsional — `Simulator`)**
-   * Sebelum menjalankan payroll, Anda dapat mengubah parameter simulasi untuk karyawan tertentu (misalnya menambah jam lembur, menambah bonus variabel, atau mengganti metode pajak dari `GROSS` ke `GROSS_UP`) untuk melihat sensitivitas perhitungannya.
-3. **Jalankan Kalkulasi Payroll (`Payroll Run`)**
-   * Pilih periode payroll (misal **November 2026 — Masa Pajak Biasa TER** atau **Desember 2026 — Masa Pajak Terakhir Pasal 17**) dan tipe run (`REGULAR` atau `THR`).
-   * Klik **Calculate Payroll**. Backend akan membekukan *snapshot* input, mengeksekusi 13 tahap kalkulasi, mendeteksi anomali, dan menampilkan **Tabel Payroll Register (Gross-to-Net)**.
-4. **Inspeksi Slip Gaji & Calculation Trace (`Payslip & Trace`)**
-   * Klik salah satu nama karyawan di *Payroll Register* untuk membuka tampilan **Slip Gaji** berdampingan dengan **Calculation Trace JSON** (penjelasan langkah demi langkah untuk prorata, lembur, iuran BPJS, bruto pajak, tarif TER/Pasal 17, hingga *Net Pay*).
-5. **Validasi Kepatuhan & Jurnal Akuntansi**
-   * Periksa ringkasan **Rekap PPh 21**, **Rekap BPJS per Program**, serta **Jurnal Akuntansi** untuk memastikan `Total Debit == Total Kredit` per *cost center* sebelum menyetujui (*Approve & Lock*) *payroll run*.
+1. **Cek Data Master & Skenario (`Master Data & Regulasi`)**
+   * Buka menu **Master Data & Regulasi** untuk melihat seluruh data yang telah ter-*inject* otomatis: profil perusahaan, daftar 10 skenario karyawan uji, komponen gaji multi-dimensi, konfigurasi BPJS 5 program, serta lapisan Pasal 17 & TER PP 58/2023.
+2. **Jalankan & Simulasikan Payroll (`Payroll Run & Simulator`)**
+   * Pilih periode payroll (**November 2026 — Masa Biasa TER** atau **Desember 2026 — Masa Pajak Terakhir P17**) yang sudah terhitung otomatis saat startup.
+   * Klik **Buka Simulator Input** untuk mencoba mengubah metode pajak (`GROSS` / `GROSS_UP` / `NET`), bonus variabel, jam lembur hari kerja/libur, atau hari *unpaid leave*, lalu klik **Terapkan Simulasi & Hitung Ulang**.
+   * Coba klik **Jalankan THR Run (Multi-Run)** di periode yang sama untuk menguji aturan **Multi-Run PPh 21 (`BR-TAX-009`)** dan **BPJS 1x/bulan (`BR-BPJS-TK-007`)**.
+3. **Inspeksi Slip Gaji & Calculation Trace (`Slip Gaji & Trace`)**
+   * Klik tombol **Slip & Trace** pada salah satu baris di *Payroll Register* untuk melihat **Slip Gaji** berdampingan dengan **Explainable Calculation Trace** (Prorata Multi-Segment, Lembur `1/173`, BPJS 5 Program, PPh 21 TER / Gross-Up / Pasal 17 Refund, serta raw `calculation_trace_json`).
+4. **Validasi Jurnal Akuntansi & Kunci Run**
+   * Periksa bagian **Jurnal Akuntansi Otomatis** di bawah tabel *Payroll Register* untuk memastikan `Total Debit == Total Kredit` per *cost center* (`CC-ENG`, `CC-FIN`, `CC-OPS`), lalu klik **Approve & Kunci Run** untuk mengunci run menjadi `APPROVED` (*immutable*).
 
 ### Ringkasan Endpoint REST API Utama (`/api/v1`)
 
 | Method & Endpoint | Fungsi |
 |---|---|
-| `GET /api/v1/master/employees` | Daftar karyawan uji beserta komponen gaji, profil pajak, & BPJS |
-| `GET /api/v1/master/rules/active` | Melihat parameter aturan hukum (`rule_set_versions`) & kebijakan aktif |
-| `POST /api/v1/simulator/inputs` | Mengubah parameter simulasi sementara (lembur/bonus/metode pajak) |
-| `GET /api/v1/payroll-periods` | Daftar periode payroll yang tersedia |
-| `POST /api/v1/payroll-runs` | Membuat *draft payroll run* baru (`REGULAR` / `THR` / `OFF_CYCLE` / `FINAL_SETTLEMENT`) |
-| `POST /api/v1/payroll-runs/{runId}/calculate` | Membekukan snapshot & mengeksekusi mesin kalkulasi 13 tahap |
-| `GET /api/v1/payroll-runs/{runId}/results` | Mengambil tabel *Payroll Register (Gross-to-Net)* & status anomali |
-| `GET /api/v1/payroll-runs/{runId}/results/{employeeId}/trace` | Mengambil detail Slip Gaji & *Calculation Trace JSON* per karyawan |
-| `POST /api/v1/payroll-runs/{runId}/approve` | Mengunci run menjadi `APPROVED` (*immutable*) & membangkitkan jurnal |
+| `GET /api/v1/health` | Pemeriksaan status kesehatan backend |
+| `GET /api/v1/master/overview` | Mengambil profil perusahaan, kebijakan, aturan aktif, komponen gaji, dan 10 skenario uji |
+| `GET /api/v1/payroll-periods` | Daftar periode payroll yang tersedia (Nov & Des 2026) |
+| `GET /api/v1/payroll-runs` | Daftar seluruh *payroll run* aktif |
+| `POST /api/v1/payroll-runs/calculate` | Membekukan snapshot & mengeksekusi mesin kalkulasi 13 tahap (`REGULAR` / `THR`) |
+| `GET /api/v1/payroll-runs/{runId}/results` | Mengambil tabel *Payroll Register (Gross-to-Net)* & *anomaly flags* |
+| `GET /api/v1/payroll-runs/{runId}/results/{resultId}` | Mengambil detail Slip Gaji (`payroll_details`) & *Calculation Trace JSON* per karyawan |
+| `POST /api/v1/payroll-runs/{runId}/approve` | Mengunci run menjadi `APPROVED` (*immutable*) & mem-posting jurnal |
 | `GET /api/v1/payroll-runs/{runId}/journal` | Melihat baris jurnal akuntansi seimbang (`Debit == Kredit`) per *cost center* |
+| `GET /api/v1/simulator/overrides?payrollPeriodId=...` | Melihat daftar override simulator aktif untuk suatu periode |
+| `POST /api/v1/simulator/override` | Menerapkan simulasi sementara (metode pajak/bonus/lembur/unpaid) & hitung ulang |
+| `POST /api/v1/simulator/reset?payrollPeriodId=...` | Mereset seluruh simulasi pada periode terkait ke data seed awal & hitung ulang |
+
+---
+
+## 8. Indeks Dokumentasi Analisis (`docs/`) & Pengujian Unit
+
+### 8.1 Paket Dokumentasi BA & SA (`docs/`)
+
+Seluruh spesifikasi bisnis, aturan matematis regulasi Indonesia, kontrak API, dan skema database tersimpan di folder `docs/`:
+
+* [00-Master-Roadmap-BA-SA-SDLC.md](docs/00-Master-Roadmap-BA-SA-SDLC.md) — Peta jalan proyek, penguncian cakupan MVP, register regulasi, status implementasi awal, dan katalog `UAT-001` s/d `UAT-022`.
+* [dokumen-saran.md](docs/dokumen-saran.md) — Catatan review audit internal BA/SA serta verifikasi regulasi PPh 21 & BPJS.
+* **Business Analysis (`docs/01-business-analysis/`):**
+  * [01-BRD-Business-Requirements-Document.md](docs/01-business-analysis/01-BRD-Business-Requirements-Document.md) — Tujuan bisnis, RACI & SoD 14 peran, serta katalog `BR-001` s/d `BR-026`.
+  * [02-BPA-Business-Process-Architecture-and-Flows.md](docs/01-business-analysis/02-BPA-Business-Process-Architecture-and-Flows.md) — Diagram alur proses *end-to-end* (`BPA-01` s/d `BPA-10`).
+  * [03-Business-Rules-and-Calculation-Specification.md](docs/01-business-analysis/03-Business-Rules-and-Calculation-Specification.md) — Rumus deterministik Prorata, Lembur PP 35/2021, BPJS Kes & 5 TK, PPh 21 TER/Pasal 17/Gross-Up, THR, dan kompensasi PKWT/PHK.
+  * [04-SOP-Standard-Operating-Procedures.md](docs/01-business-analysis/04-SOP-Standard-Operating-Procedures.md) — 7 SOP operasional (`SOP-PAY-001` s/d `SOP-PAY-007`).
+* **System Analysis (`docs/02-system-analysis/`):**
+  * [01-SRS-Software-Requirements-Specification.md](docs/02-system-analysis/01-SRS-Software-Requirements-Specification.md) — Spesifikasi fungsional, NFR, dan *Requirements Traceability Matrix*.
+  * [02-Use-Case-and-State-Machine.md](docs/02-system-analysis/02-Use-Case-and-State-Machine.md) — Use Case (`UC-01` s/d `UC-13`) & State Machine diagram.
+  * [03-ERD-and-Data-Dictionary.md](docs/02-system-analysis/03-ERD-and-Data-Dictionary.md) — ERD per domain, kamus data fisik, dan standar JSON `calculation_trace_json`.
+  * [04-API-and-Integration-Specification.md](docs/02-system-analysis/04-API-and-Integration-Specification.md) — Konvensi protokol REST, error catalog, dan format integrasi eksternal.
+  * [05-System-Design-and-Architecture.md](docs/02-system-analysis/05-System-Design-and-Architecture.md) — Desain Modular Monolith, keamanan UU PDP, observabilitas, dan realisasi stack implementasi.
+
+### 8.2 Menjalankan Unit Test Kalkulator Backend
+
+Untuk menguji rumus deterministik pada `ProrataCalculator`, `OvertimeCalculator`, `BpjsCalculator`, dan `Pph21Calculator` (`PayrollCalculatorTest`) secara terisolasi tanpa Docker:
+
+```bash
+cd backend
+mvn test
+# Atau jika menggunakan Maven binary lokal:
+# /home/aliube/.m2/wrapper/dists/apache-maven-3.10.0-bin/39q0qgmngdu329psje7bjgne79/apache-maven-3.10.0/bin/mvn test
+```
