@@ -1,0 +1,36 @@
+# Java / Maven
+target/
+*.jar
+*.war
+*.ear
+.mvn/wrapper/maven-wrapper.jar
+*.class
+*.log
+
+# Node / Angular
+node_modules/
+dist/
+.angular/
+tmp/
+out-tsc/
+coverage/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# IDE & Editors
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+*.swp
+*.swo
+*~
+
+# OS & Environment
+.DS_Store
+Thumbs.db
+.env
+.env.*
+!.env.example
