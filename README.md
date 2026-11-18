@@ -145,6 +145,7 @@ Payroll/
 │       │       └── db/migration/              # Skrip SQL Flyway (V1__init_schema.sql & V2__seed_master_data.sql)
 │       └── test/
 │           └── java/com/payroll/
+│               ├── architecture/              # ModularMonolithBoundaryTest (cegah cross-domain SQL join)
 │               └── service/calculator/        # PayrollCalculatorTest (unit test vektor kalkulasi)
 └── frontend/                                  # Aplikasi Web Portal Angular 18
     ├── Dockerfile                             # Build Angular -> Nginx static server + API reverse proxy
@@ -288,13 +289,26 @@ Seluruh spesifikasi bisnis, aturan matematis regulasi Indonesia, kontrak API, da
   * [04-API-and-Integration-Specification.md](docs/02-system-analysis/04-API-and-Integration-Specification.md) — Konvensi protokol REST, error catalog, dan format integrasi eksternal.
   * [05-System-Design-and-Architecture.md](docs/02-system-analysis/05-System-Design-and-Architecture.md) — Desain Modular Monolith, keamanan UU PDP, observabilitas, dan realisasi stack implementasi.
 
-### 8.2 Menjalankan Unit Test Kalkulator Backend
+### 8.2 Menjalankan Unit Test Kalkulator & Boundary Modular Monolith
 
-Untuk menguji rumus deterministik pada `ProrataCalculator`, `OvertimeCalculator`, `BpjsCalculator`, dan `Pph21Calculator` (`PayrollCalculatorTest`) secara terisolasi tanpa Docker:
+Untuk menjalankan seluruh unit test deterministik (`PayrollCalculatorTest`) serta pengujian batas modul anti-*cross-domain SQL join* (`ModularMonolithBoundaryTest`) secara terisolasi tanpa Docker:
 
 ```bash
 cd backend
+
+# Jalankan seluruh test (kalkulator + boundary arsitektur)
 mvn test
+
+# Jalankan khusus test pengecekan pelanggaran cross-domain JOIN & batas modul
+mvn test -Dtest=ModularMonolithBoundaryTest
+
 # Atau jika menggunakan Maven binary lokal:
-# /home/aliube/.m2/wrapper/dists/apache-maven-3.10.0-bin/39q0qgmngdu329psje7bjgne79/apache-maven-3.10.0/bin/mvn test
+# /home/aliube/.m2/wrapper/dists/apache-maven-3.10.0-bin/39q0qgmngdu329psje7bjgne79/apache-maven-3.10.0/bin/mvn test -Dtest=ModularMonolithBoundaryTest
 ```
+
+`ModularMonolithBoundaryTest` memverifikasi 5 aturan batas arsitektur secara otomatis:
+1. Seluruh `@Entity` wajib terdaftar ke salah satu dari 6 *Bounded Context* (`ORGANIZATION`, `REGULATORY`, `EMPLOYEE_COMPENSATION`, `TIME_AND_INPUTS`, `PAYROLL_EXECUTION`, `ACCOUNTING_SETTLEMENT`).
+2. Tidak ada anotasi relasi JPA (`@ManyToOne`, `@OneToMany`, `@JoinColumn`, dll.) yang melakukan *join* lintas domain.
+3. Tidak ada `@Query` JPQL/native di `com.payroll.repository` yang melakukan `JOIN` lintas domain.
+4. Pemindaian seluruh kode produksi `.java` untuk mendeteksi raw SQL/JPQL `JOIN` maupun `CROSS JOIN` lintas domain (beserta *self-test* bahwa validator menangkap query pelanggar).
+5. Seluruh class di `com.payroll.service.calculator` harus murni logika hitung tanpa dependensi database/repository.
