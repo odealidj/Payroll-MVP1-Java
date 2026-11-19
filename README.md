@@ -106,7 +106,7 @@ flowchart TD
 ## 3. Teknologi yang Digunakan
 
 | Lapisan | Teknologi | Peran & Alasan Pemilihan |
-|---|---|---|
+| --- | --- | --- |
 | **Backend Framework** | **Java 21 + Spring Boot 3.x** | Ekosistem enterprise stabil dengan tipe **`BigDecimal`** bawaan untuk aritmatika finansial presisi tetap (*fixed-point*) tanpa *floating-point drift*. |
 | **Database Utama** | **PostgreSQL 16** | Penyimpanan transaksional **ACID**, mendukung `UUID`, `DECIMAL(18,2)`, `JSONB` (untuk *snapshot* & *calculation trace*), serta `CHECK` constraint ketat. |
 | **Migrasi & Seeder** | **Flyway** | Menjalankan DDL skema (`V1`) dan injeksi otomatis data master serta skenario uji karyawan (`V2`) setiap kali database diinisialisasi. |
@@ -123,6 +123,7 @@ Menggunakan konvensi **Standard Layered Architecture** yang umum dipakai oleh de
 ```text
 Payroll/
 ├── README.md                                  # Dokumentasi utama proyek ini
+├── Makefile                                   # Shortcut perintah Docker & Test (make up, make test, dll.)
 ├── docker-compose.yml                         # Orkestrasi 4 container (postgres, redis, backend, frontend)
 ├── docs/                                      # Dokumentasi BA, SA, ERD, API & Roadmap SDLC
 ├── backend/                                   # Aplikasi Backend Spring Boot 3.3 (Java 21)
@@ -146,6 +147,7 @@ Payroll/
 │       └── test/
 │           └── java/com/payroll/
 │               ├── architecture/              # ModularMonolithBoundaryTest (cegah cross-domain SQL join)
+│               ├── integration/               # PayrollIntegrationTest (uji API end-to-end vs Postgres/Redis)
 │               └── service/calculator/        # PayrollCalculatorTest (unit test vektor kalkulasi)
 └── frontend/                                  # Aplikasi Web Portal Angular 18
     ├── Dockerfile                             # Build Angular -> Nginx static server + API reverse proxy
@@ -176,7 +178,7 @@ Payroll/
 Karena modul master di-*inject* langsung lewat skrip SQL (`V2__seed_master_data.sql`), begitu aplikasi menyala Anda sudah memiliki **1 PT (`PT Nusantara Teknologi`)**, struktur organisasi, parameter regulasi, dan **daftar skenario karyawan uji** yang siap dihitung:
 
 | Kode Uji | Profil & Skenario Karyawan | Aturan yang Teruji Otomatis |
-|---|---|---|
+| --- | --- | --- |
 | **EMP-001** | PKWTT Normal, `TK/0` (**TER A**), Metode **GROSS** | Alur standar Gaji Pokok + Tunjangan Tetap, BPJS Kes 4%/1%, BPJS TK, PPh 21 TER A |
 | **EMP-002** | PKWTT Gaji Tinggi (`> Rp15 jt`), `K/1` (**TER B**) | Pembatasan upah atas (*wage cap*) BPJS Kesehatan (Rp12 jt) dan JP BPJS TK |
 | **EMP-003** | PKWTT Metode **GROSS-UP**, `K/3` (**TER C**) | Solver iterasi *fixed-point* hingga `Tunjangan Pajak == PPh 21 Terutang` |
@@ -195,21 +197,27 @@ Karena modul master di-*inject* langsung lewat skrip SQL (`V2__seed_master_data.
 ## 6. Cara Menjalankan Aplikasi
 
 ### Prasyarat
+
 Pastikan di mesin Anda sudah terpasang:
+
 * **Docker Engine** & **Docker Compose v2** (`docker compose version`)
 
 *(Opsional jika ingin menjalankan atau debug langsung di luar Docker: Java 21 JDK, Maven 3.9+, dan Node.js 20+)*
 
 ### Menjalankan Seluruh Stack dengan Docker (1 Perintah)
 
+### Menjalankan Seluruh Stack dengan Docker (via Makefile atau Docker Compose)
+
 Dari folder root `/home/aliube/Workspace/Project-Personal/Gemini/Payroll`:
 
 ```bash
 # 1. Build image backend & frontend, lalu nyalakan seluruh layanan di background
 docker compose up --build -d
+make up                  # atau: docker compose up --build -d
 
 # 2. Pantau log startup (pastikan Flyway selesai inject V1 & V2 dan Spring Boot ready)
 docker compose logs -f backend
+make logs                # atau: docker compose logs -f backend
 ```
 
 ### Akses Layanan Setelah Berjalan
@@ -217,7 +225,7 @@ docker compose logs -f backend
 > **Catatan Port Host:** Port host `5439`, `6381`, dan `8085` digunakan di `docker-compose.yml` agar tidak bentrok dengan layanan lain pada port default (`5432`, `6379`, `8080`). Di dalam jaringan internal Docker, layanan tetap berkomunikasi pada port standar (`postgres:5432`, `redis:6379`, `backend:8080`).
 
 | Layanan | Alamat / Port Host | Keterangan |
-|---|---|---|
+| --- | --- | --- |
 | **Web Frontend (Angular + Nginx)** | `http://localhost:4200` | Antarmuka utama Payroll Portal (otomatis mem-proxy `/api/` ke backend) |
 | **Backend REST API (Spring Boot)** | `http://localhost:8085/api/v1` | Endpoint kalkulasi, master read, simulator, & trace |
 | **PostgreSQL 16** | `localhost:5439` | Database `payroll_db` (user/pass: `payroll` / `payroll123`, skema & seed otomatis via Flyway) |
@@ -228,9 +236,11 @@ docker compose logs -f backend
 ```bash
 # Menghentikan seluruh container tanpa menghapus data database
 docker compose down
+make down                # atau: docker compose down
 
 # Menghentikan container SEKALIGUS menghapus volume DB (reset ulang data seed V1 & V2)
 docker compose down -v
+make reset               # atau: docker compose down -v && docker compose up --build -d
 ```
 
 ---
@@ -253,7 +263,7 @@ docker compose down -v
 ### Ringkasan Endpoint REST API Utama (`/api/v1`)
 
 | Method & Endpoint | Fungsi |
-|---|---|
+| --- | --- |
 | `GET /api/v1/health` | Pemeriksaan status kesehatan backend |
 | `GET /api/v1/master/overview` | Mengambil profil perusahaan, kebijakan, aturan aktif, komponen gaji, dan 10 skenario uji |
 | `GET /api/v1/payroll-periods` | Daftar periode payroll yang tersedia (Nov & Des 2026) |
@@ -291,24 +301,43 @@ Seluruh spesifikasi bisnis, aturan matematis regulasi Indonesia, kontrak API, da
 
 ### 8.2 Menjalankan Unit Test Kalkulator & Boundary Modular Monolith
 
+### 8.2 Menjalankan Unit Test, Boundary Test & Integration Test (Makefile)
+
 Untuk menjalankan seluruh unit test deterministik (`PayrollCalculatorTest`) serta pengujian batas modul anti-*cross-domain SQL join* (`ModularMonolithBoundaryTest`) secara terisolasi tanpa Docker:
+Dari folder root proyek (`/home/aliube/Workspace/Project-Personal/Gemini/Payroll`), gunakan `Makefile` (mirip workflow di Go / .NET):
 
 ```bash
 cd backend
+# Lihat seluruh daftar perintah yang tersedia
+make help
 
 # Jalankan seluruh test (kalkulator + boundary arsitektur)
 mvn test
+# Jalankan Unit Test rumus kalkulator (10 test, tanpa butuh DB)
+make test-unit
 
 # Jalankan khusus test pengecekan pelanggaran cross-domain JOIN & batas modul
 mvn test -Dtest=ModularMonolithBoundaryTest
+# Jalankan Architecture Boundary Test anti-cross-domain SQL join (5 test, tanpa butuh DB)
+make test-arch
 
 # Atau jika menggunakan Maven binary lokal:
 # /home/aliube/.m2/wrapper/dists/apache-maven-3.10.0-bin/39q0qgmngdu329psje7bjgne79/apache-maven-3.10.0/bin/mvn test -Dtest=ModularMonolithBoundaryTest
+# Jalankan Integration Test End-to-End via HTTP API (6 test, butuh Postgres & Redis via make up)
+make test-integration
+
+# Jalankan SEMUA test sekaligus (Unit + Architecture + Integration)
+make test
 ```
 
 `ModularMonolithBoundaryTest` memverifikasi 5 aturan batas arsitektur secara otomatis:
+
 1. Seluruh `@Entity` wajib terdaftar ke salah satu dari 6 *Bounded Context* (`ORGANIZATION`, `REGULATORY`, `EMPLOYEE_COMPENSATION`, `TIME_AND_INPUTS`, `PAYROLL_EXECUTION`, `ACCOUNTING_SETTLEMENT`).
 2. Tidak ada anotasi relasi JPA (`@ManyToOne`, `@OneToMany`, `@JoinColumn`, dll.) yang melakukan *join* lintas domain.
 3. Tidak ada `@Query` JPQL/native di `com.payroll.repository` yang melakukan `JOIN` lintas domain.
 4. Pemindaian seluruh kode produksi `.java` untuk mendeteksi raw SQL/JPQL `JOIN` maupun `CROSS JOIN` lintas domain (beserta *self-test* bahwa validator menangkap query pelanggar).
 5. Seluruh class di `com.payroll.service.calculator` harus murni logika hitung tanpa dependensi database/repository.
+Ringkasan cakupan suite pengujian:
+6. **`PayrollCalculatorTest` (Unit Test):** Menguji rumus Prorata (*single* & *multi-segment*), Lembur PP 35/2021 (`1/173` & aturan 75%), BPJS Kesehatan & 5 Program BPJS TK (cap Rp12 jt / Rp11,0863 jt, tanggungan tambahan, pengecualian WNA/usia, JKP non-iuran, 1x/bulan), serta PPh 21 (TER A/B/C, Multi-Run MTD `BR-TAX-009`, Gross-Up konvergen, dan Pasal 17 *Tax Refund*).
+7. **`ModularMonolithBoundaryTest` (Architecture Boundary Test):** Memastikan seluruh `@Entity` terdaftar ke 6 *Bounded Context*, bebas relasi JPA lintas domain, bebas `@Query` / raw SQL `JOIN` & `CROSS JOIN` lintas domain, serta class `service/calculator` murni bebas dependensi database.
+8. **`PayrollIntegrationTest` (Integration Test):** Menjalankan aplikasi Spring Boot penuh ke PostgreSQL 16 (Flyway V1 & V2) & Redis 7 untuk menguji endpoint `/api/v1/master/overview`, kalkulasi November & Desember 2026, Multi-Run THR, *Calculation Trace JSON*, Jurnal Seimbang (`Debit == Kredit`), Simulator override/reset, serta *immutability* `ERR_PAY_RUN_IMMUTABLE` (`409 Conflict`).
